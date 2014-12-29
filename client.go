@@ -27,18 +27,20 @@ func (s sshrpcSession) Write(p []byte) (n int, err error) {
 	return pipe.Write(p)
 }
 
+// Client represents an RPC client using an SSH backed connection.
 type Client struct {
 	*rpc.Client
 	Config    *ssh.ClientConfig
 	Subsystem string
 }
 
+// NewClient returns a new Client to handle RPC requests.
 func NewClient() *Client {
 
 	config := &ssh.ClientConfig{
-		User: "test",
+		User: "sshrpc",
 		Auth: []ssh.AuthMethod{
-			ssh.Password("test"),
+			ssh.Password("sshrpc"),
 		},
 	}
 
@@ -46,6 +48,7 @@ func NewClient() *Client {
 
 }
 
+// Connect starts a client connection to the given SSH/RPC server.
 func (c *Client) Connect(address string) {
 
 	sshClient, err := ssh.Dial("tcp", address, c.Config)

@@ -9,18 +9,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// Server represents an SSH Server that spins up RPC servers when requested.
 type Server struct {
 	*rpc.Server
 	Config    *ssh.ServerConfig
 	Subsystem string
 }
 
+// NewServer returns a new Server to handle incoming SSH and RPC requests.
 func NewServer() *Server {
 	c := &ssh.ServerConfig{
-		// NoClientAuth: true,
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			// Should use constant-time compare (or better, salt+hash) in a production setting.
-			if c.User() == "test" && string(pass) == "test" {
+			if c.User() == "sshrpc" && string(pass) == "sshrpc" {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("password rejected for %q", c.User())
@@ -30,6 +30,7 @@ func NewServer() *Server {
 
 }
 
+// StartServer starts the server listening for requests
 func (s *Server) StartServer(address string) {
 
 	// Once a ServerConfig has been configured, connections can be accepted.
@@ -83,14 +84,6 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
 			log.Printf("could not accept channel (%s)", err)
 			continue
 		}
-
-		/*
-			close := func() {
-				channel.Close()
-				log.Printf("session closed")
-			}
-			defer close()
-		*/
 
 		// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 		go func(in <-chan *ssh.Request) {
