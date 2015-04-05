@@ -1,37 +1,17 @@
 package sshrpc
 
 import (
-	"fmt"
 	"net/rpc"
 
 	"golang.org/x/crypto/ssh"
 )
 
-type sshrpcSession struct {
-	*ssh.Session
-}
-
-func (s sshrpcSession) Read(p []byte) (n int, err error) {
-	pipe, err := s.StdoutPipe()
-	if err != nil {
-		return 0, err
-	}
-	return pipe.Read(p)
-}
-
-func (s sshrpcSession) Write(p []byte) (n int, err error) {
-	pipe, err := s.StdinPipe()
-	if err != nil {
-		return 0, err
-	}
-	return pipe.Write(p)
-}
-
 // Client represents an RPC client using an SSH backed connection.
 type Client struct {
 	*rpc.Client
-	Config    *ssh.ClientConfig
-	Subsystem string
+	Config      *ssh.ClientConfig
+	ChannelName string
+	sshClient   *ssh.Client
 }
 
 // NewClient returns a new Client to handle RPC requests.
@@ -44,7 +24,7 @@ func NewClient() *Client {
 		},
 	}
 
-	return &Client{nil, config, "sshrpc"}
+	return &Client{nil, config, DefaultRPCChannel, nil}
 
 }
 
@@ -55,22 +35,49 @@ func (c *Client) Connect(address string) {
 	if err != nil {
 		panic("Failed to dial: " + err.Error())
 	}
+	c.sshClient = sshClient
 
-	// Each ClientConn can support multiple interactive sessions,
-	// represented by a Session.
-	sshSession, err := sshClient.NewSession()
+	// Each ClientConn can support multiple channels
+	channel, err := c.openRPCChannel(c.ChannelName)
 	if err != nil {
-		panic("Failed to create session: " + err.Error())
-	}
-	//defer sshSession.Close()
-
-	err = sshSession.RequestSubsystem(c.Subsystem)
-	if err != nil {
-		fmt.Println("Unable to start subsystem:", err.Error())
+		panic("Failed to create channel: " + err.Error())
 	}
 
-	session := sshrpcSession{sshSession}
-	c.Client = rpc.NewClient(session)
+	c.Client = rpc.NewClient(channel)
 
 	return
+}
+
+// openRPCChannel opens an SSH RPC channel and makes an ssh subsystem request to trigger remote RPC server start
+func (c *Client) openRPCChannel(channelName string) (ssh.Channel, error) {
+	channel, in, err := c.sshClient.OpenChannel(channelName, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// SSH Documentation states that this go channel of requests needs to be serviced
+	go func(reqs <-chan *ssh.Request) error {
+		for msg := range reqs {
+			switch msg.Type {
+
+			default:
+				if msg.WantReply {
+					msg.Reply(false, nil)
+				}
+			}
+		}
+		return nil
+	}(in)
+
+	var msg struct {
+		Subsystem string
+	}
+	msg.Subsystem = RPCSubsystem
+
+	ok, err := channel.SendRequest("subsystem", true, ssh.Marshal(&msg))
+	if err == nil && !ok {
+		return nil, err
+	}
+
+	return channel, nil
 }

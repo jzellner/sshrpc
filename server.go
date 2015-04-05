@@ -9,11 +9,17 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// DefaultRPCChannel is the Channel Name that will be used to carry the RPC traffic, can be changed in Serverr and Client
+const DefaultRPCChannel = "RPCChannel"
+
+// RPCSubsystem is the subsystem that will be used to trigger RPC endpoint creation
+const RPCSubsystem = "RPCSubsystem"
+
 // Server represents an SSH Server that spins up RPC servers when requested.
 type Server struct {
 	*rpc.Server
-	Config    *ssh.ServerConfig
-	Subsystem string
+	Config      *ssh.ServerConfig
+	ChannelName string
 }
 
 // NewServer returns a new Server to handle incoming SSH and RPC requests.
@@ -26,7 +32,7 @@ func NewServer() *Server {
 			return nil, fmt.Errorf("password rejected for %q", c.User())
 		},
 	}
-	return &Server{rpc.NewServer(), c, "sshrpc"}
+	return &Server{rpc.NewServer(), c, DefaultRPCChannel}
 
 }
 
@@ -62,20 +68,21 @@ func (s *Server) StartServer(address string) {
 	}
 }
 
+// handleRequests handles global out-of-band SSH Requests
 func (s *Server) handleRequests(reqs <-chan *ssh.Request) {
 	for req := range reqs {
 		log.Printf("recieved out-of-band request: %+v", req)
 	}
 }
 
+// handleChannels handels SSH Channel requests and their local out-of-band SSH Requests
 func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
 	// Service the incoming Channel channel.
 	for newChannel := range chans {
-		// Channels have a type, depending on the application level
-		// protocol intended. In the case of a shell, the type is
-		// "session" and ServerShell may be used to present a simple
-		// terminal interface.
-		if t := newChannel.ChannelType(); t != "session" {
+
+		log.Printf("Received channel: %v", newChannel.ChannelType())
+		// Check the type of channel
+		if t := newChannel.ChannelType(); t != s.ChannelName {
 			newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", t))
 			continue
 		}
@@ -84,8 +91,9 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
 			log.Printf("could not accept channel (%s)", err)
 			continue
 		}
+		log.Printf("Accepted channel")
 
-		// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
+		// Channels can have out-of-band requests
 		go func(in <-chan *ssh.Request) {
 			for req := range in {
 				ok := false
@@ -95,7 +103,8 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
 					ok = true
 					log.Printf("subsystem '%s'", req.Payload)
 					switch string(req.Payload[4:]) {
-					case s.Subsystem:
+					//RPCSubsystem Request made indicates client desires RPC Server access
+					case RPCSubsystem:
 						go s.ServeConn(channel)
 						log.Printf("Started SSH RPC")
 					default:
