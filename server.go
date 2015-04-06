@@ -20,6 +20,8 @@ type Server struct {
 	*rpc.Server
 	Config      *ssh.ServerConfig
 	ChannelName string
+	RPCClient   *rpc.Client
+	sshConn     ssh.Conn
 }
 
 // NewServer returns a new Server to handle incoming SSH and RPC requests.
@@ -32,7 +34,7 @@ func NewServer() *Server {
 			return nil, fmt.Errorf("password rejected for %q", c.User())
 		},
 	}
-	return &Server{rpc.NewServer(), c, DefaultRPCChannel}
+	return &Server{rpc.NewServer(), c, DefaultRPCChannel, nil, nil}
 
 }
 
@@ -55,6 +57,7 @@ func (s *Server) StartServer(address string) {
 		}
 		// Before use, a handshake must be performed on the incoming net.Conn.
 		sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, s.Config)
+		s.sshConn = sshConn
 		if err != nil {
 			log.Printf("failed to handshake (%s)", err)
 			continue
@@ -65,6 +68,7 @@ func (s *Server) StartServer(address string) {
 		go s.handleRequests(reqs)
 		// Accept all channels
 		go s.handleChannels(chans)
+
 	}
 }
 
@@ -107,6 +111,14 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
 					case RPCSubsystem:
 						go s.ServeConn(channel)
 						log.Printf("Started SSH RPC")
+						// triggers reverse RPC connection as well
+						clientChannel, err := openRPCClientChannel(s.sshConn, s.ChannelName+"-reverse")
+						if err != nil {
+							log.Printf("Failed to create client channel: " + err.Error())
+							continue
+						}
+						s.RPCClient = rpc.NewClient(clientChannel)
+						log.Printf("Started SSH RPC client")
 					default:
 						log.Printf("Unknown subsystem: %s", req.Payload)
 					}
