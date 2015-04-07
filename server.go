@@ -16,7 +16,7 @@ const DefaultRPCChannel = "RPCChannel"
 const RPCSubsystem = "RPCSubsystem"
 
 // CallbackFunc to be called when reverse RPC client is created
-type CallbackFunc func(RPCClient *rpc.Client)
+type CallbackFunc func(RPCClient *rpc.Client, conn ssh.Conn)
 
 // Server represents an SSH Server that spins up RPC servers when requested.
 type Server struct {
@@ -122,7 +122,7 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel, sshConn ssh.Conn) {
 						}
 						rpcClient := rpc.NewClient(clientChannel)
 						if s.CallbackFunc != nil {
-							s.CallbackFunc(rpcClient)
+							s.CallbackFunc(rpcClient, sshConn)
 						}
 						log.Printf("Started SSH RPC client")
 					default:
