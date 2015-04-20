@@ -18,6 +18,8 @@ const RPCSubsystem = "RPCSubsystem"
 // CallbackFunc to be called when reverse RPC client is created
 type CallbackFunc func(RPCClient *rpc.Client, conn ssh.Conn)
 
+type PublicKeyCallback func(conn ssh.ConnMetadata, key ssh.PublicKey)
+
 // Server represents an SSH Server that spins up RPC servers when requested.
 type Server struct {
 	*rpc.Server
@@ -28,17 +30,12 @@ type Server struct {
 }
 
 // NewServer returns a new Server to handle incoming SSH and RPC requests.
-func NewServer() *Server {
-	c := &ssh.ServerConfig{
-		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			if c.User() == "sshrpc" && string(pass) == "sshrpc" {
-				return nil, nil
-			}
-			return nil, fmt.Errorf("password rejected for %q", c.User())
-		},
+func NewServer(pkCallback func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error)) *Server {
+	return &Server{
+		Server:      rpc.NewServer(),
+		Config:      &ssh.ServerConfig{PublicKeyCallback: pkCallback},
+		ChannelName: DefaultRPCChannel,
 	}
-	return &Server{Server: rpc.NewServer(), Config: c, ChannelName: DefaultRPCChannel}
-
 }
 
 // StartServer starts the server listening for requests
